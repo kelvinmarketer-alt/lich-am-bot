@@ -4,16 +4,20 @@
  * Nhắn "thêm giỗ ông nội 20/8 âm, mất 1985" -> Claude tách dữ liệu -> ghi vào
  * tab "Ngày của tôi". Hỏi "tháng này có giỗ ai" -> đọc Sheet trả lời.
  *
- * CÀI ĐẶT (Project Settings -> Script properties), thêm 3 khóa:
- *   TELEGRAM_BOT_TOKEN   token bot Telegram (BotFather)
+ * CÀI ĐẶT (Project Settings -> Script properties):
+ *   TELEGRAM_BOT_TOKEN   token bot Telegram (BotFather)            [bắt buộc]
+ *   ALLOWED_CHAT_ID      chat_id của bạn -> chỉ mình bạn dùng được [nên có]
+ *   --- chọn 1 trong 2 nhà cung cấp AI ---
+ *   OPENAI_API_KEY       API key OpenAI (platform.openai.com)
  *   ANTHROPIC_API_KEY    API key Claude (console.anthropic.com)
- *   ALLOWED_CHAT_ID      (tùy chọn) chat_id của bạn -> chỉ mình bạn dùng được
+ *   AI_PROVIDER          'openai' hoặc 'claude' (tùy chọn; tự đoán theo key đang có)
  * Rồi: Deploy -> New deployment -> Web app -> Execute as: Me, Who has access:
  * Anyone -> Deploy. Sau đó chạy hàm setWebhook() 1 lần.
  */
 
 var SHEET_ID = '1RQkkjYbg9x2evjpAnlL0pfBQiN6YUuD9-MPD1cHaW9I';
 var SHEET_NAME = 'Ngày của tôi';
+var OPENAI_MODEL = 'gpt-4o-mini';                  // rẻ, nhanh, hỗ trợ function calling
 var CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
 // Cột (1-based) trong tab "Ngày của tôi"
@@ -70,7 +74,7 @@ function helpText(){
 // ---------------- Xử lý 1 tin nhắn ----------------
 function handleMessage(chatId, text){
   var events = readEvents();
-  var result = callClaude(text, events);
+  var result = callLLM(text, events);
 
   if (result.tool){
     var reply;
@@ -86,8 +90,8 @@ function handleMessage(chatId, text){
   }
 }
 
-// ---------------- Gọi Claude (tool use) ----------------
-function callClaude(userText, events){
+// ---------------- Gọi AI (OpenAI hoặc Claude) ----------------
+function buildSystem(events){
   var today = new Date();
   var ctx = events.length
     ? events.map(function(ev){
@@ -97,20 +101,20 @@ function callClaude(userText, events){
                (ev.on ? '' : ' [đang tắt]') + ')';
       }).join('\n')
     : '(chưa có ngày nào)';
-
-  var system =
-    'Bạn là trợ lý quản lý lịch nhắc gia đình của người Việt, ghi dữ liệu vào Google Sheet.\n' +
+  return 'Bạn là trợ lý quản lý lịch nhắc gia đình của người Việt, ghi dữ liệu vào Google Sheet.\n' +
     'Hôm nay: ' + today.getFullYear() + '-' + (today.getMonth()+1) + '-' + today.getDate() + ' (dương lịch).\n' +
     'Danh sách ngày hiện có (tab "Ngày của tôi"):\n' + ctx + '\n\n' +
     'QUY TẮC:\n' +
-    '- Khi người dùng muốn THÊM/SỬA/XÓA/BẬT-TẮT một ngày: gọi đúng tool tương ứng.\n' +
+    '- Khi người dùng muốn THÊM/SỬA/XÓA/BẬT-TẮT một ngày: gọi đúng tool/function tương ứng.\n' +
     '- Khi người dùng HỎI hoặc trò chuyện: trả lời bằng tiếng Việt, ngắn gọn, KHÔNG gọi tool.\n' +
     '- Mặc định âm/dương theo phân loại: giỗ -> "Âm", sinh nhật -> "Dương", nếu người dùng không nói rõ.\n' +
     '- "lap" mặc định "Hằng năm". Mùng 1 / ngày Rằm thì "Hằng tháng" và bỏ trống tháng.\n' +
     '- "remind" là chuỗi số ngày cách nhau dấu phẩy, ví dụ "7,3,1,0". Nếu người dùng không nói, bỏ trống.\n' +
     '- Để sửa/xóa/bật-tắt, dùng "match_name" khớp gần đúng với tên đang có ở trên.';
+}
 
-  var tools = [
+function toolDefs(){
+  return [
     { name:'add_event', description:'Thêm một ngày mới (giỗ, sinh nhật, kỷ niệm...) vào Sheet.',
       input_schema:{ type:'object', properties:{
         name:{type:'string', description:'Tên sự kiện, vd "Giỗ ông nội"'},
@@ -135,7 +139,41 @@ function callClaude(userText, events){
       input_schema:{ type:'object', properties:{
         match_name:{type:'string'}, enabled:{type:'boolean'} }, required:['match_name','enabled'] } }
   ];
+}
 
+function callLLM(userText, events){
+  var system = buildSystem(events), tools = toolDefs();
+  var provider = prop('AI_PROVIDER') || (prop('OPENAI_API_KEY') ? 'openai' : 'claude');
+  return provider === 'claude'
+    ? callClaude(system, userText, tools)
+    : callOpenAI(system, userText, tools);
+}
+
+function callOpenAI(system, userText, tools){
+  var oaTools = tools.map(function(t){
+    return { type:'function', function:{ name:t.name, description:t.description, parameters:t.input_schema } };
+  });
+  var payload = {
+    model: OPENAI_MODEL, max_tokens: 1024, tool_choice:'auto', tools: oaTools,
+    messages: [{ role:'system', content: system }, { role:'user', content: userText }]
+  };
+  var res = UrlFetchApp.fetch('https://api.openai.com/v1/chat/completions', {
+    method:'post', contentType:'application/json',
+    headers:{ Authorization: 'Bearer ' + prop('OPENAI_API_KEY') },
+    payload: JSON.stringify(payload), muteHttpExceptions:true
+  });
+  var data = JSON.parse(res.getContentText());
+  if (!data.choices) return { text:'Lỗi gọi OpenAI: ' + res.getContentText().slice(0,160) };
+  var m = data.choices[0].message;
+  if (m.tool_calls && m.tool_calls.length){
+    var tc = m.tool_calls[0];
+    var args = {}; try { args = JSON.parse(tc.function.arguments || '{}'); } catch(e){}
+    return { tool: tc.function.name, input: args };
+  }
+  return { text: m.content || '' };
+}
+
+function callClaude(system, userText, tools){
   var payload = {
     model: CLAUDE_MODEL, max_tokens: 1024, system: system, tools: tools,
     messages: [{ role:'user', content: userText }]
@@ -146,8 +184,7 @@ function callClaude(userText, events){
     payload: JSON.stringify(payload), muteHttpExceptions:true
   });
   var data = JSON.parse(res.getContentText());
-  if (!data.content) return { text:'Lỗi gọi AI: ' + res.getContentText().slice(0,150) };
-
+  if (!data.content) return { text:'Lỗi gọi Claude: ' + res.getContentText().slice(0,160) };
   var textOut = '';
   for (var i=0; i<data.content.length; i++){
     var b = data.content[i];

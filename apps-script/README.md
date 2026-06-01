@@ -29,13 +29,21 @@ Mở [Google Sheet](https://docs.google.com/spreadsheets/d/1RQkkjYbg9x2evjpAnlL0
 
 ### 3. Khai báo khóa bí mật
 **⚙ Project Settings** (bánh răng bên trái) → kéo xuống **Script properties** →
-**Add script property**, thêm 3 dòng:
+**Add script property**:
 
 | Property | Value |
 |----------|-------|
-| `TELEGRAM_BOT_TOKEN` | token bot Telegram (từ @BotFather) |
-| `ANTHROPIC_API_KEY` | API key Claude — lấy ở <https://console.anthropic.com> |
-| `ALLOWED_CHAT_ID` | chat_id của bạn (để chỉ mình bạn dùng được — khuyến nghị) |
+| `TELEGRAM_BOT_TOKEN` | token bot Telegram (từ @BotFather) — *bắt buộc* |
+| `ALLOWED_CHAT_ID` | chat_id của bạn (để chỉ mình bạn dùng được — *khuyến nghị*) |
+
+Rồi chọn **1 trong 2** nhà cung cấp AI:
+
+| Dùng OpenAI | Dùng Claude |
+|-------------|-------------|
+| `OPENAI_API_KEY` = key ở <https://platform.openai.com/api-keys> | `ANTHROPIC_API_KEY` = key ở <https://console.anthropic.com> |
+
+Bot tự đoán nhà cung cấp theo key bạn khai. Nếu khai cả hai, thêm property
+`AI_PROVIDER` = `openai` hoặc `claude` để chỉ định.
 
 ### 4. Deploy thành Web App
 **Deploy → New deployment** → ⚙ chọn **Web app**:
@@ -67,7 +75,8 @@ Bot trả lời "✅ Đã thêm…" và bạn thấy dòng mới xuất hiện t
 | "tháng này nhà mình có giỗ ai?" / "sắp tới có gì?" | đọc Sheet, trả lời |
 
 ## Ghi chú
-- Model mặc định: `claude-haiku-4-5` (rẻ, nhanh — đổi ở biến `CLAUDE_MODEL` trong `Code.gs`).
+- Model mặc định: OpenAI `gpt-4o-mini` / Claude `claude-haiku-4-5` (đều rẻ & nhanh —
+  đổi ở biến `OPENAI_MODEL` / `CLAUDE_MODEL` trong `Code.gs`).
 - Mỗi lần sửa code phải **Deploy → Manage deployments → Edit → Version: New version**
   để bản mới có hiệu lực.
 - Mặc định âm/dương: **giỗ → Âm**, **sinh nhật → Dương** (nói rõ thì bot theo bạn).
