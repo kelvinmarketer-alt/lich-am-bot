@@ -36,8 +36,23 @@ function stripAccents(s){
 function doGet(){ return ContentService.createTextOutput('Bot lịch âm đang chạy ✓'); }
 
 function doPost(e){
+  var update;
+  try { update = JSON.parse(e.postData.contents); }
+  catch (err){ return ContentService.createTextOutput(''); }
+
+  // ----- Chống xử lý TRÙNG khi Telegram gửi lại cùng một update -----
+  var id = String(update.update_id || '');
+  var cache = CacheService.getScriptCache();
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch (err){ return ContentService.createTextOutput(''); }
   try {
-    var update = JSON.parse(e.postData.contents);
+    if (id && cache.get('u_' + id)) return ContentService.createTextOutput(''); // đã xử lý rồi
+    if (id) cache.put('u_' + id, '1', 600);   // đánh dấu đã nhận (giữ 10 phút)
+  } finally {
+    lock.releaseLock();
+  }
+
+  try {
     var msg = update.message || update.edited_message;
     if (!msg || !msg.text) return ContentService.createTextOutput('');
     var chatId = msg.chat.id.toString();
@@ -56,7 +71,7 @@ function doPost(e){
 
     handleMessage(chatId, text);
   } catch (err){
-    // nuốt lỗi để Telegram không spam lại; có thể Logger.log(err)
+    // nuốt lỗi để Telegram không spam lại
   }
   return ContentService.createTextOutput('');
 }
