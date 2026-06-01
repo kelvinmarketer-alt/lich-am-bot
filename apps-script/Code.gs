@@ -40,19 +40,26 @@ function doPost(e){
   try { update = JSON.parse(e.postData.contents); }
   catch (err){ return ContentService.createTextOutput(''); }
 
-  // ----- Chống xử lý TRÙNG khi Telegram gửi lại cùng một update -----
-  // Đánh dấu trước để các bản gửi lại không xử lý đôi; nếu xử lý LỖI thì gỡ
-  // dấu để Telegram thử lại (tránh mất câu trả lời khi gặp trục trặc tạm thời).
-  var id = String(update.update_id || '');
-  var cache = CacheService.getScriptCache();
+  // ----- Chống xử lý TRÙNG (nhớ VĨNH VIỄN) -----
+  // GAS luôn trả 302 -> Telegram gửi lại update hàng giờ. Phải nhớ update_id đã
+  // xử lý lâu dài (Script Properties), KHÔNG dùng cache hết hạn 10 phút -> tránh
+  // việc cùng 1 tin bị xử lý lại sau mỗi 10 phút.
+  var id = update.update_id;
   var lock = LockService.getScriptLock();
-  try { lock.waitLock(20000); } catch (err){ return ContentService.createTextOutput(''); }
-  var dup = false;
+  try { lock.waitLock(25000); } catch (err){ return ContentService.createTextOutput(''); }
+  var fresh = true;
   try {
-    if (id && cache.get('u_' + id)) dup = true;
-    else if (id) cache.put('u_' + id, '1', 600);
+    var sp = PropertiesService.getScriptProperties();
+    var seen = JSON.parse(sp.getProperty('SEEN_IDS') || '[]');
+    if (id == null || seen.indexOf(id) >= 0) {
+      fresh = false;
+    } else {
+      seen.push(id);
+      if (seen.length > 300) seen = seen.slice(seen.length - 300);  // giữ 300 id gần nhất
+      sp.setProperty('SEEN_IDS', JSON.stringify(seen));
+    }
   } finally { lock.releaseLock(); }
-  if (dup) return ContentService.createTextOutput('');
+  if (!fresh) return ContentService.createTextOutput('');
 
   try {
     var msg = update.message || update.edited_message;
@@ -73,7 +80,7 @@ function doPost(e){
 
     handleMessage(chatId, text);
   } catch (err){
-    if (id) cache.remove('u_' + id);   // lỗi -> cho phép Telegram thử lại
+    // KHÔNG gỡ dấu id -> tránh lặp vô hạn. Nếu lỗi tạm thời, bạn nhắn lại là được.
   }
   return ContentService.createTextOutput('');
 }
