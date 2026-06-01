@@ -124,12 +124,14 @@ def normalize(raw):
 
     if "thang" in lap:                 # Lặp = "Hằng tháng" (Rằm / Mùng 1)
         kind = "monthly"
+    elif "mot lan" in lap or "1 lan" in lap or "once" in lap:   # Lặp = "Một lần"
+        kind = "once_lunar" if amduong == "am" else "once_solar"
     elif amduong == "am":
         kind = "lunar"
     else:
         kind = "solar"
 
-    if kind in ("lunar", "solar") and month is None:
+    if kind in ("lunar", "solar", "once_lunar", "once_solar") and month is None:
         return None
 
     icon = ICONS.get(loai, "📌")
@@ -177,12 +179,36 @@ def next_lunar_monthly(day, today, max_days=70):
     return None
 
 
+def once_date(ev, today):
+    """Sự kiện 1 lần: cần Năm (cột Năm gốc) để biết xảy ra khi nào.
+    Qua ngày rồi -> trả None (ngừng nhắc)."""
+    year = ev.get("base_year")
+    if not year:
+        return None
+    if ev["kind"] == "once_solar":
+        try:
+            d = date(year, ev["month"], ev["day"])
+        except ValueError:
+            return None
+    else:  # once_lunar: đổi ngày âm (ngày, tháng, năm) -> dương
+        sd, sm, sy = lunar.lunar2solar(ev["day"], ev["month"], year)
+        if sy == 0:
+            return None
+        d = date(sy, sm, sd)
+    return d if d >= today else None
+
+
 def resolve_next(ev, today):
-    if ev["kind"] == "monthly":
+    k = ev["kind"]
+    if k == "monthly":
         return next_lunar_monthly(ev["day"], today)
-    if ev["kind"] == "lunar":
+    if k == "lunar":
         return next_lunar_yearly(ev["day"], ev["month"], today)
-    return next_solar_yearly(ev["day"], ev["month"], today)
+    if k == "solar":
+        return next_solar_yearly(ev["day"], ev["month"], today)
+    if k in ("once_solar", "once_lunar"):
+        return once_date(ev, today)
+    return None
 
 
 def lunar_label(d):
@@ -211,6 +237,8 @@ def daily_header(today):
 
 def extra_note(ev, occ):
     """'giỗ năm thứ X' / 'tròn Y tuổi' nếu có Năm gốc."""
+    if ev["kind"] in ("once_solar", "once_lunar"):
+        return ""   # sự kiện 1 lần: Năm gốc là năm diễn ra, không tính tuổi
     if not ev["base_year"]:
         return ""
     n = occ.year - ev["base_year"]

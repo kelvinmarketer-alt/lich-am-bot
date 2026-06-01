@@ -126,6 +126,7 @@ function buildSystem(events){
     '- Khi người dùng HỎI hoặc trò chuyện: trả lời bằng tiếng Việt, ngắn gọn, KHÔNG gọi tool.\n' +
     '- Mặc định âm/dương theo phân loại: giỗ -> "Âm", sinh nhật -> "Dương", nếu người dùng không nói rõ.\n' +
     '- "lap" mặc định "Hằng năm". Mùng 1 / ngày Rằm thì "Hằng tháng" và bỏ trống tháng.\n' +
+    '- Sự kiện chỉ xảy ra MỘT LẦN rồi thôi (đi lễ, hẹn, sự kiện có ngày cụ thể) -> lap "Một lần" và base_year = NĂM diễn ra. Nếu người dùng không nói năm, suy ra năm sắp tới gần nhất so với hôm nay.\n' +
     '- "remind" là chuỗi số ngày cách nhau dấu phẩy, ví dụ "7,3,1,0". Nếu người dùng không nói, bỏ trống.\n' +
     '- Để sửa/xóa/bật-tắt, dùng "match_name" khớp gần đúng với tên đang có ở trên.';
 }
@@ -138,8 +139,8 @@ function toolDefs(){
         loai:{type:'string', enum:['giỗ','sinh nhật','kỷ niệm','lễ','khác']},
         day:{type:'integer'}, month:{type:'integer', description:'Bỏ trống nếu lặp Hằng tháng'},
         amduong:{type:'string', enum:['Âm','Dương']},
-        lap:{type:'string', enum:['Hằng năm','Hằng tháng']},
-        base_year:{type:'integer', description:'Năm mất hoặc năm sinh (tùy chọn)'},
+        lap:{type:'string', enum:['Hằng năm','Hằng tháng','Một lần']},
+        base_year:{type:'integer', description:'Năm mất/năm sinh; với Lặp "Một lần" thì là NĂM diễn ra sự kiện'},
         remind:{type:'string', description:'vd "7,3,1,0" (tùy chọn)'},
         note:{type:'string'}
       }, required:['name','loai','day'] } },
@@ -222,8 +223,11 @@ function readEvents(){
     var r = vals[i], name = (r[COL.name-1]||'').toString().trim();
     if (!name || name.charAt(0) === '(') continue;
     var lap = (r[COL.lap-1]||'').toString(), amduong = (r[COL.amduong-1]||'').toString();
-    var kind = stripAccents(lap).indexOf('thang') >= 0 ? 'monthly'
-             : (stripAccents(amduong) === 'am' ? 'lunar' : 'solar');
+    var sl = stripAccents(lap);
+    var kind = sl.indexOf('thang') >= 0 ? 'monthly'
+             : (sl.indexOf('mot lan') >= 0 || sl.indexOf('1 lan') >= 0)
+                 ? (stripAccents(amduong) === 'am' ? 'once_lunar' : 'once_solar')
+                 : (stripAccents(amduong) === 'am' ? 'lunar' : 'solar');
     out.push({
       row: i+2, on: r[COL.on-1] === true || stripAccents(r[COL.on-1]) === 'x' || stripAccents(r[COL.on-1])==='true',
       name:name, loai:(r[COL.loai-1]||'').toString(), lap:lap,
@@ -265,8 +269,12 @@ function doAdd(inp){
   sh.getRange(row, COL.remind).setNumberFormat('@').setValue(inp.remind || '');
   sh.getRange(row, COL.note).setValue(inp.note || '');
 
-  var when = occurrenceText({ kind: stripAccents(lap).indexOf('thang')>=0 ? 'monthly' : (amduong==='Âm'?'lunar':'solar'),
-                              day: inp.day, month: inp.month });
+  var slap = stripAccents(lap);
+  var okind = slap.indexOf('thang')>=0 ? 'monthly'
+            : (slap.indexOf('mot lan')>=0 || slap.indexOf('1 lan')>=0)
+                ? (amduong==='Âm'?'once_lunar':'once_solar')
+                : (amduong==='Âm'?'lunar':'solar');
+  var when = occurrenceText({ kind: okind, day: inp.day, month: inp.month, year: inp.base_year });
   return '✅ Đã thêm *' + inp.name + '*\n' +
     '   ' + (inp.day) + (inp.month?('/'+inp.month):'') + ' ' + amduong +
     (inp.base_year?(' · năm gốc '+inp.base_year):'') +
@@ -316,8 +324,15 @@ function doSetEnabled(inp, events){
 
 function occurrenceText(ev){
   try {
-    if (!ev.day || (ev.kind !== 'monthly' && !ev.month)) return '';
-    var occ = nextOccurrence(ev, new Date());
+    var occ;
+    if (ev.kind === 'once_solar' || ev.kind === 'once_lunar'){
+      if (!ev.year || !ev.day || !ev.month) return '';
+      if (ev.kind === 'once_solar'){ occ = new Date(ev.year, ev.month-1, ev.day); }
+      else { var s = lunar2solar(ev.day, ev.month, ev.year); if (s[0]===0) return ''; occ = new Date(s[2], s[1]-1, s[0]); }
+    } else {
+      if (!ev.day || (ev.kind !== 'monthly' && !ev.month)) return '';
+      occ = nextOccurrence(ev, new Date());
+    }
     if (!occ) return '';
     var dd = ('0'+occ.getDate()).slice(-2), mm = ('0'+(occ.getMonth()+1)).slice(-2);
     return '\n   ➜ Lần tới: ' + dd + '/' + mm + '/' + occ.getFullYear() + ' (dương)';
