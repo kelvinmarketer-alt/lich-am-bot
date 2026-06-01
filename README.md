@@ -82,6 +82,12 @@ python3 test_local.py          # kiểm tra thuật toán âm lịch (không c�
 SHEET_ID=1RQkkjYbg9x2evjpAnlL0pfBQiN6YUuD9-MPD1cHaW9I DRY_RUN=1 python3 bot.py
 ```
 
+## 🤖 (Tùy chọn) Bot chat AI tự điền Sheet
+
+Muốn nhắn tiếng Việt cho bot để nó **tự thêm/sửa ngày** thay vì gõ tay vào Sheet?
+Xem [apps-script/README.md](apps-script/README.md) — dùng Google Apps Script + Claude,
+miễn phí host, dữ liệu lưu thẳng vào cùng Google Sheet.
+
 ## 📁 Cấu trúc
 
 | File | Vai trò |
