@@ -41,16 +41,18 @@ function doPost(e){
   catch (err){ return ContentService.createTextOutput(''); }
 
   // ----- Chống xử lý TRÙNG khi Telegram gửi lại cùng một update -----
+  // Đánh dấu trước để các bản gửi lại không xử lý đôi; nếu xử lý LỖI thì gỡ
+  // dấu để Telegram thử lại (tránh mất câu trả lời khi gặp trục trặc tạm thời).
   var id = String(update.update_id || '');
   var cache = CacheService.getScriptCache();
   var lock = LockService.getScriptLock();
-  try { lock.waitLock(30000); } catch (err){ return ContentService.createTextOutput(''); }
+  try { lock.waitLock(20000); } catch (err){ return ContentService.createTextOutput(''); }
+  var dup = false;
   try {
-    if (id && cache.get('u_' + id)) return ContentService.createTextOutput(''); // đã xử lý rồi
-    if (id) cache.put('u_' + id, '1', 600);   // đánh dấu đã nhận (giữ 10 phút)
-  } finally {
-    lock.releaseLock();
-  }
+    if (id && cache.get('u_' + id)) dup = true;
+    else if (id) cache.put('u_' + id, '1', 600);
+  } finally { lock.releaseLock(); }
+  if (dup) return ContentService.createTextOutput('');
 
   try {
     var msg = update.message || update.edited_message;
@@ -71,7 +73,7 @@ function doPost(e){
 
     handleMessage(chatId, text);
   } catch (err){
-    // nuốt lỗi để Telegram không spam lại
+    if (id) cache.remove('u_' + id);   // lỗi -> cho phép Telegram thử lại
   }
   return ContentService.createTextOutput('');
 }
