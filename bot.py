@@ -272,9 +272,9 @@ def build_message(today, events):
         for days, ev, occ in reminders:
             when = "🟥 *HÔM NAY*" if days == 0 else "còn *%d ngày*" % days
             lines.append(
-                "%s %s — %s%s\n    ↳ %02d/%02d/%d (%s)"
+                "%s %s — %s%s\n    ↳ %s, %02d/%02d/%d (%s)"
                 % (ev["icon"], ev["name"], when, extra_note(ev, occ),
-                   occ.day, occ.month, occ.year, lunar_label(occ))
+                   THU[occ.weekday()], occ.day, occ.month, occ.year, lunar_label(occ))
             )
     return "\n".join(lines), reminders
 

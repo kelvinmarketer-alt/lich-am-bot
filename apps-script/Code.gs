@@ -107,6 +107,7 @@ function handleMessage(chatId, text){
     else if (t === 'update_event') reply = doUpdate(inp, events);
     else if (t === 'delete_event') reply = doDelete(inp, events);
     else if (t === 'set_enabled') reply = doSetEnabled(inp, events);
+    else if (t === 'list_upcoming') reply = doListUpcoming(inp.filter_loai);
     else reply = 'Mình chưa hiểu thao tác này.';
     tgSend(chatId, reply);
   } else {
@@ -130,7 +131,8 @@ function buildSystem(events){
     'Danh sách ngày hiện có (tab "Ngày của tôi"):\n' + ctx + '\n\n' +
     'QUY TẮC:\n' +
     '- Khi người dùng muốn THÊM/SỬA/XÓA/BẬT-TẮT một ngày: gọi đúng tool/function tương ứng.\n' +
-    '- Khi người dùng HỎI hoặc trò chuyện: trả lời bằng tiếng Việt, ngắn gọn, KHÔNG gọi tool.\n' +
+    '- Khi người dùng hỏi "sắp tới có gì", "tháng này có gì", "tháng này có giỗ ai", "gần đây có sự kiện gì"... -> BẮT BUỘC gọi tool list_upcoming (TUYỆT ĐỐI không tự liệt kê từ danh sách trên). Nếu hỏi riêng một loại (chỉ giỗ, chỉ sinh nhật) thì đặt filter_loai.\n' +
+    '- Khi người dùng HỎI việc khác hoặc trò chuyện: trả lời bằng tiếng Việt, ngắn gọn, KHÔNG gọi tool.\n' +
     '- Mặc định âm/dương theo phân loại: giỗ -> "Âm", sinh nhật -> "Dương", nếu người dùng không nói rõ.\n' +
     '- "lap" mặc định "Hằng năm". Mùng 1 / ngày Rằm thì "Hằng tháng" và bỏ trống tháng.\n' +
     '- Sự kiện chỉ xảy ra MỘT LẦN rồi thôi (đi lễ, hẹn, sự kiện có ngày cụ thể) -> lap "Một lần" và base_year = NĂM diễn ra. Nếu người dùng không nói năm, suy ra năm sắp tới gần nhất so với hôm nay.\n' +
@@ -162,7 +164,10 @@ function toolDefs(){
       input_schema:{ type:'object', properties:{ match_name:{type:'string'} }, required:['match_name'] } },
     { name:'set_enabled', description:'Bật hoặc tắt nhắc một ngày.',
       input_schema:{ type:'object', properties:{
-        match_name:{type:'string'}, enabled:{type:'boolean'} }, required:['match_name','enabled'] } }
+        match_name:{type:'string'}, enabled:{type:'boolean'} }, required:['match_name','enabled'] } },
+    { name:'list_upcoming', description:'Liệt kê sự kiện sắp tới (trong tháng này; nếu ít thì 2 sự kiện gần nhất), kèm ngày dương + thứ. Dùng khi người dùng hỏi sắp tới/tháng này có gì.',
+      input_schema:{ type:'object', properties:{
+        filter_loai:{type:'string', description:'Lọc theo phân loại nếu hỏi cụ thể, vd "giỗ" hay "sinh nhật". Bỏ trống nếu hỏi chung.'} } } }
   ];
 }
 
@@ -342,8 +347,68 @@ function occurrenceText(ev){
     }
     if (!occ) return '';
     var dd = ('0'+occ.getDate()).slice(-2), mm = ('0'+(occ.getMonth()+1)).slice(-2);
-    return '\n   ➜ Lần tới: ' + dd + '/' + mm + '/' + occ.getFullYear() + ' (dương)';
+    return '\n   ➜ Lần tới: ' + weekdayVN(occ) + ', ' + dd + '/' + mm + '/' + occ.getFullYear() + ' (dương)';
   } catch (e){ return ''; }
+}
+
+function weekdayVN(d){
+  return ['Chủ Nhật','Thứ Hai','Thứ Ba','Thứ Tư','Thứ Năm','Thứ Sáu','Thứ Bảy'][d.getDay()];
+}
+
+function eventIcon(loai){
+  var m = { gio:'🕯', 'sinh nhat':'🎂', 'ky niem':'💍', le:'🎌', khac:'📌' };
+  return m[stripAccents(loai)] || '•';
+}
+
+// Ngày dương sắp tới của 1 sự kiện (mọi loại lặp). Trả về Date hoặc null.
+function occDate(e, today){
+  if (e.kind === 'once_solar' || e.kind === 'once_lunar'){
+    if (!e.base || !e.day || !e.month) return null;
+    var d;
+    if (e.kind === 'once_solar') d = new Date(e.base, e.month-1, e.day);
+    else { var s = lunar2solar(e.day, e.month, e.base); if (s[0]===0) return null; d = new Date(s[2], s[1]-1, s[0]); }
+    return d >= today ? d : null;
+  }
+  return nextOccurrence(e, today);
+}
+
+// Liệt kê sự kiện sắp tới: ưu tiên trong tháng này; nếu <2 thì lấy 2 gần nhất.
+function doListUpcoming(filterLoai){
+  var events = readEvents().filter(function(e){ return e.on; });
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var items = [];
+  for (var i=0;i<events.length;i++){
+    var e = events[i];
+    if (filterLoai && stripAccents(e.loai).indexOf(stripAccents(filterLoai)) < 0) continue;
+    var occ = occDate(e, today);
+    if (!occ) continue;
+    items.push({ e:e, occ:occ, days: Math.round((occ - today)/86400000) });
+  }
+  items.sort(function(a,b){ return a.occ - b.occ; });
+  if (!items.length) return '📭 Sắp tới chưa có sự kiện nào' + (filterLoai ? ' loại "'+filterLoai+'"' : '') + '.';
+
+  var thisMonth = items.filter(function(it){
+    return it.occ.getFullYear()===today.getFullYear() && it.occ.getMonth()===today.getMonth();
+  });
+  var chosen, head;
+  if (thisMonth.length >= 2){ chosen = thisMonth.slice(0,10); head = '📅 *Trong tháng này:*'; }
+  else { chosen = items.slice(0,2); head = '📅 *Sắp tới:*'; }
+
+  var lines = [head, ''];
+  for (var j=0;j<chosen.length;j++){
+    var it = chosen[j], ev = it.e, o = it.occ;
+    var dd = ('0'+o.getDate()).slice(-2), mm = ('0'+(o.getMonth()+1)).slice(-2);
+    var lunarTxt = '';
+    if (ev.kind === 'lunar' || ev.kind === 'monthly' || ev.kind === 'once_lunar'){
+      var lu = solar2lunar(o.getDate(), o.getMonth()+1, o.getFullYear());
+      lunarTxt = ' (' + lu[0] + '/' + lu[1] + ' ÂL)';
+    }
+    var when = it.days === 0 ? '🟥 HÔM NAY' : ('còn ' + it.days + ' ngày');
+    lines.push(eventIcon(ev.loai) + ' *' + ev.name + '*');
+    lines.push('   ' + weekdayVN(o) + ', ' + dd + '/' + mm + '/' + o.getFullYear() + lunarTxt + ' · ' + when);
+  }
+  return lines.join('\n');
 }
 
 // ---------------- Telegram gửi tin ----------------
