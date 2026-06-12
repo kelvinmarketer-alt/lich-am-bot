@@ -21,4 +21,6 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           REMIND_DAYS: "7,3,1,0"
-          DAILY_REPORT: "1"
+          # "0" = chỉ nhắn khi CÓ sự kiện tới lịch (Mùng 1/Rằm/lễ/giỗ/SN).
+          # Đổi thành "1" nếu muốn mỗi sáng đều nhận lịch âm hôm nay.
+          DAILY_REPORT: "0"

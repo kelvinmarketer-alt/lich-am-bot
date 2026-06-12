@@ -268,7 +268,8 @@ def build_message(today, events):
     if DAILY_REPORT:
         lines.append(daily_header(today))
     if reminders:
-        lines.append("\n🔔 *NHẮC NGÀY QUAN TRỌNG*")
+        header = "🔔 *NHẮC NGÀY QUAN TRỌNG*"
+        lines.append(("\n" + header) if lines else header)
         for days, ev, occ in reminders:
             when = "🟥 *HÔM NAY*" if days == 0 else "còn *%d ngày*" % days
             lines.append(
