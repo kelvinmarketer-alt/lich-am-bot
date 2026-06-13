@@ -165,7 +165,7 @@ function toolDefs(){
     { name:'set_enabled', description:'Bật hoặc tắt nhắc một ngày.',
       input_schema:{ type:'object', properties:{
         match_name:{type:'string'}, enabled:{type:'boolean'} }, required:['match_name','enabled'] } },
-    { name:'list_upcoming', description:'Liệt kê sự kiện sắp tới (trong tháng này; nếu ít thì 2 sự kiện gần nhất), kèm ngày dương + thứ. Dùng khi người dùng hỏi sắp tới/tháng này có gì.',
+    { name:'list_upcoming', description:'Liệt kê TẤT CẢ sự kiện trong 7 ngày tới (không giới hạn số lượng), kèm ngày dương + thứ. Dùng khi người dùng hỏi sắp tới/tuần này/tháng này có gì.',
       input_schema:{ type:'object', properties:{
         filter_loai:{type:'string', description:'Lọc theo phân loại nếu hỏi cụ thể, vd "giỗ" hay "sinh nhật". Bỏ trống nếu hỏi chung.'} } } }
   ];
@@ -236,7 +236,8 @@ function readEvents(){
     if (!name || name.charAt(0) === '(') continue;
     var lap = (r[COL.lap-1]||'').toString(), amduong = (r[COL.amduong-1]||'').toString();
     var sl = stripAccents(lap);
-    var kind = sl.indexOf('thang') >= 0 ? 'monthly'
+    var kind = sl.indexOf('thang') >= 0
+                 ? (stripAccents(amduong) === 'am' ? 'monthly' : 'monthly_solar')
              : (sl.indexOf('mot lan') >= 0 || sl.indexOf('1 lan') >= 0)
                  ? (stripAccents(amduong) === 'am' ? 'once_lunar' : 'once_solar')
                  : (stripAccents(amduong) === 'am' ? 'lunar' : 'solar');
@@ -282,7 +283,7 @@ function doAdd(inp){
   sh.getRange(row, COL.note).setValue(inp.note || '');
 
   var slap = stripAccents(lap);
-  var okind = slap.indexOf('thang')>=0 ? 'monthly'
+  var okind = slap.indexOf('thang')>=0 ? (amduong==='Âm'?'monthly':'monthly_solar')
             : (slap.indexOf('mot lan')>=0 || slap.indexOf('1 lan')>=0)
                 ? (amduong==='Âm'?'once_lunar':'once_solar')
                 : (amduong==='Âm'?'lunar':'solar');
@@ -338,11 +339,12 @@ function occurrenceText(ev){
   try {
     var occ;
     if (ev.kind === 'once_solar' || ev.kind === 'once_lunar'){
-      if (!ev.year || !ev.day || !ev.month) return '';
-      if (ev.kind === 'once_solar'){ occ = new Date(ev.year, ev.month-1, ev.day); }
-      else { var s = lunar2solar(ev.day, ev.month, ev.year); if (s[0]===0) return ''; occ = new Date(s[2], s[1]-1, s[0]); }
+      if (!ev.day || !ev.month) return '';
+      var yr = ev.year || new Date().getFullYear();
+      if (ev.kind === 'once_solar'){ occ = new Date(yr, ev.month-1, ev.day); }
+      else { var s = lunar2solar(ev.day, ev.month, yr); if (s[0]===0) return ''; occ = new Date(s[2], s[1]-1, s[0]); }
     } else {
-      if (!ev.day || (ev.kind !== 'monthly' && !ev.month)) return '';
+      if (!ev.day || (ev.kind !== 'monthly' && ev.kind !== 'monthly_solar' && !ev.month)) return '';
       occ = nextOccurrence(ev, new Date());
     }
     if (!occ) return '';
@@ -363,10 +365,11 @@ function eventIcon(loai){
 // Ngày dương sắp tới của 1 sự kiện (mọi loại lặp). Trả về Date hoặc null.
 function occDate(e, today){
   if (e.kind === 'once_solar' || e.kind === 'once_lunar'){
-    if (!e.base || !e.day || !e.month) return null;
+    if (!e.day || !e.month) return null;
+    var yr = e.base || today.getFullYear();   // không ghi năm -> năm nay
     var d;
-    if (e.kind === 'once_solar') d = new Date(e.base, e.month-1, e.day);
-    else { var s = lunar2solar(e.day, e.month, e.base); if (s[0]===0) return null; d = new Date(s[2], s[1]-1, s[0]); }
+    if (e.kind === 'once_solar') d = new Date(yr, e.month-1, e.day);
+    else { var s = lunar2solar(e.day, e.month, yr); if (s[0]===0) return null; d = new Date(s[2], s[1]-1, s[0]); }
     return d >= today ? d : null;
   }
   return nextOccurrence(e, today);
@@ -374,6 +377,7 @@ function occDate(e, today){
 
 // Liệt kê sự kiện sắp tới: ưu tiên trong tháng này; nếu <2 thì lấy 2 gần nhất.
 function doListUpcoming(filterLoai){
+  var WINDOW = 7;   // chỉ liệt kê sự kiện trong N ngày tới (đổi số này nếu muốn)
   var events = readEvents().filter(function(e){ return e.on; });
   var now = new Date();
   var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -388,12 +392,15 @@ function doListUpcoming(filterLoai){
   items.sort(function(a,b){ return a.occ - b.occ; });
   if (!items.length) return '📭 Sắp tới chưa có sự kiện nào' + (filterLoai ? ' loại "'+filterLoai+'"' : '') + '.';
 
-  var thisMonth = items.filter(function(it){
-    return it.occ.getFullYear()===today.getFullYear() && it.occ.getMonth()===today.getMonth();
-  });
+  var within = items.filter(function(it){ return it.days <= WINDOW; });  // trong N ngày tới
   var chosen, head;
-  if (thisMonth.length >= 2){ chosen = thisMonth.slice(0,10); head = '📅 *Trong tháng này:*'; }
-  else { chosen = items.slice(0,2); head = '📅 *Sắp tới:*'; }
+  if (within.length){
+    chosen = within;                                       // KHÔNG giới hạn số lượng
+    head = '📅 *Trong ' + WINDOW + ' ngày tới:*';
+  } else {
+    chosen = items.slice(0, 1);                            // 7 ngày tới trống -> gợi ý cái gần nhất
+    head = '📅 *' + WINDOW + ' ngày tới chưa có sự kiện. Gần nhất:*';
+  }
 
   var lines = [head, ''];
   for (var j=0;j<chosen.length;j++){

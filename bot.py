@@ -122,8 +122,8 @@ def normalize(raw):
     if amduong not in ("am", "duong"):
         amduong = "am" if "gio" in loai else "duong"
 
-    if "thang" in lap:                 # Lặp = "Hằng tháng" (Rằm / Mùng 1)
-        kind = "monthly"
+    if "thang" in lap:                 # Lặp = "Hằng tháng"
+        kind = "monthly" if amduong == "am" else "monthly_solar"
     elif "mot lan" in lap or "1 lan" in lap or "once" in lap:   # Lặp = "Một lần"
         kind = "once_lunar" if amduong == "am" else "once_solar"
     elif amduong == "am":
@@ -179,12 +179,28 @@ def next_lunar_monthly(day, today, max_days=70):
     return None
 
 
+def next_solar_monthly(day, today, max_months=13):
+    """Ngày dương gần nhất có NGÀY = day (vd ngày 28 dương mỗi tháng)."""
+    y, m = today.year, today.month
+    for _ in range(max_months):
+        try:
+            cand = date(y, m, day)
+        except ValueError:        # tháng không có ngày đó (vd 31/2) -> bỏ qua
+            cand = None
+        if cand and cand >= today:
+            return cand
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return None
+
+
 def once_date(ev, today):
     """Sự kiện 1 lần: cần Năm (cột Năm gốc) để biết xảy ra khi nào.
     Qua ngày rồi -> trả None (ngừng nhắc)."""
     year = ev.get("base_year")
     if not year:
-        return None
+        year = today.year   # "Một lần" không ghi năm -> coi như năm nay
     if ev["kind"] == "once_solar":
         try:
             d = date(year, ev["month"], ev["day"])
@@ -202,6 +218,8 @@ def resolve_next(ev, today):
     k = ev["kind"]
     if k == "monthly":
         return next_lunar_monthly(ev["day"], today)
+    if k == "monthly_solar":
+        return next_solar_monthly(ev["day"], today)
     if k == "lunar":
         return next_lunar_yearly(ev["day"], ev["month"], today)
     if k == "solar":

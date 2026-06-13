@@ -128,6 +128,14 @@ function nextOccurrence(ev, today){
       var d = new Date(y, ev.month-1, ev.day);
       if (d >= t) return d;
     }
+  } else if (ev.kind === 'monthly_solar'){   // ngày N dương lịch mỗi tháng
+    var yy = t.getFullYear(), mm = t.getMonth();
+    for (var c = 0; c < 13; c++){
+      var ds = new Date(yy, mm, ev.day);
+      if (ds.getDate() === ev.day && ds >= t) return ds;  // .getDate() khác day => tháng thiếu ngày đó
+      mm++; if (mm > 11){ mm = 0; yy++; }
+    }
+    return null;
   } else { // lunar (hằng năm) hoặc monthly
     var max = ev.kind === 'monthly' ? 70 : 420;
     for (var i = 0; i < max; i++){
